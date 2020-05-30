@@ -2,7 +2,6 @@
 #
 
 library(shiny)
-library(plotly)
 library(gifski)
 library(png)
 library(colourpicker)
