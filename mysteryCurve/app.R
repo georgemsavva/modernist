@@ -2,11 +2,10 @@
 #
 
 library(shiny)
-library(plotly)
 library(gifski)
 library(png)
 library(colourpicker)
-
+library(ambient)
 
 stipple <- function(a){
     ifelse(a>0,1,rbinom(length(a),1,1+a))
@@ -22,7 +21,7 @@ ui <- function(request) {
         
 
             fluidRow(
-            column(5,h3("Mystery CUrve Plotter"),
+            column(5,h3("Mystery Curve Plotter"),
                    fluidRow(
                        column(6,
                               #radioButtons("mode","Mode", c("Domain colouring"="domain","Curve plotting"="curve")),
@@ -32,13 +31,18 @@ ui <- function(request) {
                               textInput("widthFunction", label="width(t,a)", "pmax(4*Arg(exp(2i*pi*12*(t-4*pi*a/100))^2),1)"),
                                 textInput("hFunction", label="hue(t,a)", "sin(t)^2"),
                                 textInput("sFunction", label="saturation(t,a)", ".7"),
-                                textInput("vFunction", label="value(t,a)", "sin(2*pi*t)^2")
-                              
+                                textInput("vFunction", label="value(t,a)", "sin(2*pi*t)^2"),
+                                textInput("alphaFunction", label="alpha", "1"),
+                                selectInput("presets", label="Preset", choices=NULL, selected=NULL, multiple=FALSE),
+                                fluidRow(
+                                    column(6,    fileInput("fileup",label = "Open settings from file"))
+                                           ,column(6,downloadButton("save","Download current settings")))
                        ),
                        column(6,
                               radioButtons("animatemode","Animation:", 
                                            c("Single value of 'a' (animate with slider)"="single",
-                                             "All values of 'a'"="simultaneous",
+                                             "All 'a' superimposed"="simultaneous",
+                                             "All 'a' in grid layout"="grid",
                                              "Animate over a=(0,1) (make .gif)"="animate")),
                               sliderInput("avalue",label="a",min = 0,max=1, step=0.001,value=0, 
                                           animate=animationOptions(interval=200)),
@@ -48,38 +52,83 @@ ui <- function(request) {
                               fluidRow(
                                   column(4,textInput("resolution", label="Resolution", "2000")),
                                   column(4,textInput("nSteps", label="length(t)", "1000")),
-                                  column(4,textInput("nFrames", label="length(a)", "100"))),
+                                  column(4,textInput("nFrames", label="a=", "seq(0,1,l=100)"))),
                               fluidRow(
                                   column(4,textInput("maxt",label="max(t)","2")),
                                   column(4,textInput("limitScale", label="Scale", "1.2")),
-                                  column(4,colourInput("bgcol",label = "Background",value = "white"))),
-                              fluidRow(column(6,bookmarkButton()),column(6,textInput("seed", "seed=", "28052002"))),
-                              textInput("alphaFunction", label="alpha", "1")
+                                  column(4,colourInput("bgcol",label = "Background",value = "#f7f7f7"))),
+                              fluidRow(column(6,bookmarkButton()),
+                                       column(6,actionButton("hires",label = "Hi res image")),
+                                       column(6,actionButton("gif", label = "Make animated gif"))),
+                              fluidRow(column(6,textInput("seed", "seed=", "28052002")))
                        
                    )
             )
         ),
         
         column(7,
-               imageOutput("distPlot", width = "800px", height="800px")
+               imageOutput("distPlot", height="80%")
         )
     ))
 }
 
+## Each preset is in a list in its own rds file.
+
+populatePresets <- function(){
+    
+}
+
+
+readfromFile <- function(filename,session){
+    list <- as.list(read.table(filename,stringsAsFactors = FALSE))
+    for(x in names(list)) updateInput(x,list[[x]],session)
+}
+
+
+updateInput <- function(name, value, session){
+    updateTextAreaInput(session, name,value=value)
+    updateTextInput(session, name,value=value)
+}
+
+    
+
 # Define server logic required to draw a histogram
-server <- function(input, output) {
+server <- function(input, output, session) {
     vecToSegments <- function(z){
         d <- data.frame(x0=Re(z), y0=Im(z))
         d$x1 <- c(d$x0[-1], d$x0[1])
         d$y1 <- c(d$y0[-1], d$y0[1])
         d
     }
+    
+#    l <- list(nFrames=25)
+#    saveOut("test.csv",l)
+#    readfromFile("test.csv",session)
+
+    output$save <- downloadHandler(
+        filename = "settings.tab",
+        content = function(file) {
+            write.table(input, file=filename)   
+        })
+    
+    reactive({
+        # input$file1 will be NULL initially. After the user selects
+        # and uploads a file, it will be a data frame with 'name',
+        # 'size', 'type', and 'datapath' columns. The 'datapath'
+        # column will contain the local filenames where the data can
+        # be found.
+        inFile <- input$fileup
+        if (is.null(inFile))
+            return(NULL)
+        readfromFile(inFile$datapath,session)
+        
+    })
+        
     output$distPlot <- renderImage({
         graphics.off()
         set.seed(as.integer(input$seed))
         maxt = eval(parse(text = input$maxt))
-        fr = as.numeric(input$nFrames)
-        if(input$animatemode=="single") a = input$avalue else a = seq(0,1,l=fr)
+        if(input$animatemode=="single") a = input$avalue else a = eval(parse(text=input$nFrames))
         t = seq(0,maxt,l=as.numeric(input$nSteps))
         d = expand.grid(ai=1:length(a),t=t)
         d$a = a[d$ai]
@@ -135,11 +184,13 @@ server <- function(input, output) {
             
         } else {
             pl=1
-            plot(NA,xlim=c(-l,l), ylim=c(-l,l),axes=F, ann=F)
+            if(input$animatemode!="grid") plot(NA,xlim=c(-l,l), ylim=c(-l,l),axes=F, ann=F)
+            if(input$animatemode=="grid") par(mfrow=c(3,3))
             for (j in 1:length(unique(d$a))) {
                 d2 <- d[d$ai==j,]                
                 d2$x1 <- c(Re(d2$z)[-1], NA)
                 d2$y1 <- c(Im(d2$z)[-1],NA)
+                if(input$animatemode=="grid") plot(NA,xlim=c(-l,l), ylim=c(-l,l),axes=F, ann=F)
                 if(input$drawmode=="segments") segments(d2$x0,d2$y0, d2$x1,d2$y1, col = hsv(d2$h, d2$s, d2$v, d2$alpha), lwd=d2$lwd)
                 if(input$drawmode=="points") points(d2$x1,d2$y1, col = hsv(d2$h, d2$s, d2$v, d2$alpha), cex=d2$lwd, pch=20)
             }
@@ -147,8 +198,8 @@ server <- function(input, output) {
             png_file <- sprintf(png_path, 1)
             return(list(src = png_file,
                         contentType = 'image/png',
-                        width = 800,
-                        height = "100%"
+                        width = "80%",
+                        height = "80%"
                         # alt = "This is alternate text"
             ))
         }
