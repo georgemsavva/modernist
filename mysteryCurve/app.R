@@ -34,9 +34,8 @@ ui <- function(request) {
                                 textInput("vFunction", label="value(t,a)", "sin(2*pi*t)^2"),
                                 textInput("alphaFunction", label="alpha", "1"),
                                 selectInput("presets", label="Preset", choices=NULL, selected=NULL, multiple=FALSE),
-                                fluidRow(
-                                    column(6,    fileInput("fileup",label = "Open settings from file"))
-                                           ,column(6,downloadButton("save","Download current settings")))
+                                fileInput("fileup",label = "Open settings from file"),
+                                downloadButton("save","Download current settings")
                        ),
                        column(6,
                               radioButtons("animatemode","Animation:", 
@@ -46,6 +45,7 @@ ui <- function(request) {
                                              "Animate over a=(0,1) (make .gif)"="animate")),
                               sliderInput("avalue",label="a",min = 0,max=1, step=0.001,value=0, 
                                           animate=animationOptions(interval=200)),
+                              numericInput("nrowsInGrid","Rows in grid layout",value=3),
                               radioButtons("drawmode","Draw:", 
                                            c("Segments"="segments",
                                              "Points"="points")),
@@ -94,6 +94,9 @@ updateInput <- function(name, value, session){
 
 # Define server logic required to draw a histogram
 server <- function(input, output, session) {
+
+
+    
     vecToSegments <- function(z){
         d <- data.frame(x0=Re(z), y0=Im(z))
         d$x1 <- c(d$x0[-1], d$x0[1])
@@ -106,12 +109,18 @@ server <- function(input, output, session) {
 #    readfromFile("test.csv",session)
 
     output$save <- downloadHandler(
-        filename = "settings.tab",
+        filename = function() {
+            "settings.tab"
+        },
         content = function(file) {
-            write.table(input, file=filename)   
+            settings <-  lapply(reactiveValuesToList(input), as.character)
+            settings$fileup <- NULL
+            write.table(settings, file)   
         })
     
-    reactive({
+    
+    
+    observeEvent(input$fileup, {
         # input$file1 will be NULL initially. After the user selects
         # and uploads a file, it will be a data frame with 'name',
         # 'size', 'type', and 'datapath' columns. The 'datapath'
@@ -121,16 +130,17 @@ server <- function(input, output, session) {
         if (is.null(inFile))
             return(NULL)
         readfromFile(inFile$datapath,session)
-        
+
     })
-        
+
     output$distPlot <- renderImage({
         graphics.off()
         set.seed(as.integer(input$seed))
         maxt = eval(parse(text = input$maxt))
         if(input$animatemode=="single") a = input$avalue else a = eval(parse(text=input$nFrames))
         t = seq(0,maxt,l=as.numeric(input$nSteps))
-        d = expand.grid(ai=1:length(a),t=t)
+        d = expand.grid(ai=1:length(a),ti=1:length(t))
+        d$t = t[d$ti]
         d$a = a[d$ai]
         eval(parse(text = paste0("f <- function(t,a) ", input$mainFunction)))
         e <- exp(1i*t)
